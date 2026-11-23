@@ -1,0 +1,114 @@
+#!/bin/sh
+# SessionStart hook for Claude Code and Codex: herdr-resume-label claude|codex
+#
+# Stores the session on its Herdr terminal, for the Resume button:
+#   session.resume=<provider>:<session id>
+#   session.resume.flags=<Claude's permission flags>
+#
+# Background runs (claude -p, codex exec, codex review) are left alone, so they
+# never replace the session you were working in. When the hook can't tell what
+# started it, it writes nothing. It always exits 0: a hook must not block a session.
+
+provider=${1:-}
+case $provider in claude | codex) ;; *) exit 0 ;; esac
+
+terminal=${HC_TERMINAL_ID:-}
+case $terminal in "" | *[!A-Za-z0-9_.-]*) exit 0 ;; esac
+
+session=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]*\)".*/\1/p' | head -n 1)
+[ -n "$session" ] || exit 0
+
+# Arguments are handled one per line, without globbing.
+set -f
+IFS='
+'
+
+# /proc keeps a quoted prompt in one piece; ps (macOS) splits it on spaces.
+arguments_of() {
+  if [ -r "/proc/$1/cmdline" ]; then
+    tr '\0' '\n' <"/proc/$1/cmdline"
+  else
+    ps -o args= -p "$1" 2>/dev/null | tr ' ' '\n'
+  fi
+}
+
+is_agent() {
+  case $provider:${1##*/} in
+    claude:claude | codex:codex | codex:codex-* | codex:codex.js) return 0 ;;
+  esac
+  if [ "$provider" = claude ]; then
+    case $1 in */claude-code/cli.js) return 0 ;; esac
+  fi
+  return 1
+}
+
+# The arguments of the nearest agent process above this hook. The agent is the
+# program itself or the script an interpreter runs.
+agent_arguments() {
+  pid=$PPID
+  depth=0
+  while [ "$depth" -lt 8 ] && [ "${pid:-0}" -gt 1 ]; do
+    # shellcheck disable=SC2046
+    set -- $(arguments_of "$pid")
+    if [ "$#" -ge 1 ] && is_agent "$1"; then
+      shift
+      printf '%s\n' "$@"
+      return 0
+    fi
+    if [ "$#" -ge 2 ] && is_agent "$2"; then
+      shift 2
+      printf '%s\n' "$@"
+      return 0
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+# True when the first word that isn't an option is a background subcommand.
+codex_runs_in_background() {
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      -c | --config | --enable | --disable | --remote | --remote-auth-token-env | \
+        -i | --image | -m | --model | --local-provider | -p | --profile | \
+        -s | --sandbox | -C | --cd | --add-dir | -a | --ask-for-approval)
+        [ "$#" -ge 2 ] || return 1
+        shift 2
+        ;;
+      -*) shift ;;
+      exec | e | review) return 0 ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+found=$(agent_arguments) || exit 0
+# shellcheck disable=SC2086
+set -- $found
+
+flags=
+if [ "$provider" = claude ]; then
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      -p | --print) exit 0 ;;
+      --dangerously-skip-permissions) flags="$flags $1" ;;
+      --permission-mode)
+        if [ "$#" -ge 2 ]; then
+          case $2 in "" | *[!A-Za-z]*) ;; *) flags="$flags $1 $2" ;; esac
+          shift
+        fi
+        ;;
+      --permission-mode=*)
+        case ${1#--permission-mode=} in "" | *[!A-Za-z]*) ;; *) flags="$flags $1" ;; esac
+        ;;
+    esac
+    shift
+  done
+elif codex_runs_in_background "$@"; then
+  exit 0
+fi
+
+hc label "$terminal" "session.resume=$provider:$session" "session.resume.flags=${flags# }" >/dev/null 2>&1
+exit 0
