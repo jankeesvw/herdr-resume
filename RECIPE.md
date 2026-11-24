@@ -21,7 +21,7 @@ A pane header with a Resume button: after you quit Claude Code or Codex in a ter
 
 ## The Agents panel
 
-- `agents-resume` looks and works like Herdr's Agents panel, plus an **Exited** group under the others, in both sort orders, with a count like the other groups and folding the same way.
+- `agents-resume` looks and works like Herdr's Agents panel, plus an **Exited** group in both sort orders, folding like the other groups. It sits under the scrolling list, outside it, with a `border` line above, so it stays in sight however long the list gets. Past three rows (`EXITED_ROWS`) it scrolls on its own.
 - An agent lands there when it leaves `agents()`, with its labels as they were while it ran (`terminals()` leaves finished terminals out). Only agents seen in this run count, because right after a start the list is empty. The list is kept in the mod's `localStorage` under `exited`, so it survives a restart, and each entry goes after `keepMinutes` (default 60).
 - It shows, newest first, in one of two ways. Its terminal is live and runs a shell: Resume goes into that terminal ("here"). Its terminal is finished or gone, and it was on this computer: Resume opens a new tab ("tab"). A live terminal running something else hides it.
 - It's hidden while a live agent terminal carries the same session, and a session that quit twice shows once. For "tab" rows the panel asks `hc get` at most every 30 seconds whether the terminal still exists; a removed one is dropped. Entries stored before labels were kept get them from that call.

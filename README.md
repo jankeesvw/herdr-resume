@@ -72,7 +72,7 @@ Agents that were already running get the button after their next session start.
 
 ### 3. The Agents panel (optional)
 
-`agents-resume` is Herdr's own Agents panel with an **Exited** group at the bottom. An agent that quits stays there for an hour, with the time since it quit and a Resume button:
+`agents-resume` is Herdr's own Agents panel with an **Exited** group pinned under the list, so a long Idle list never pushes it out of sight. An agent that quits stays there for an hour, with the time since it quit and a Resume button. Past three rows the group scrolls on its own.
 
 - **Quit, pane still open:** Resume types the resume into that terminal, after a `cd` to the session's folder. Clicking the row goes to the terminal.
 - **Pane closed** (`ctrl-space x`, which ends the terminal too): Resume opens a new tab in the same space, with the old tab's name, and starts the session there in its own folder.

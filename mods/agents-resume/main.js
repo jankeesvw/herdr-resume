@@ -22,6 +22,9 @@ const keepMs = () => (Number(props()?.keepMinutes) > 0 ? Number(props().keepMinu
 // A second click soon after the first would land in the agent as a prompt.
 const CLICK_GUARD_MS = 3000;
 
+// Exited rows shown under the list before that part scrolls on its own.
+const EXITED_ROWS = 3;
+
 // The labels a quit agent needs, kept while it runs: a closed terminal drops out of terminals().
 const KEPT = ["session.resume", "session.resume.flags", "session.resume.cwd", "herdr.space", "where"];
 const keep = (labels) => Object.fromEntries(KEPT.filter((k) => typeof labels?.[k] === "string").map((k) => [k, labels[k]]));
@@ -668,10 +671,21 @@ export default class Agents extends View {
     const gone = { id: "exited", label: "Exited", status: null, members: exited };
     const rows = collapsed
       ? list.flatMap(withKids)
-      : [
-          ...groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]),
-          ...(exited.length ? [header(gone), ...(this.folded.has(gone.id) ? [] : exited.map((e) => this.exitedRow(t, e, now)))] : []),
-        ];
+      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
+    // Quit agents sit under the list, outside its scroll, so a long Idle list
+    // never pushes them out of sight. Past EXITED_ROWS they scroll on their own.
+    const footer = exited.length === 0 ? null : v_flex()
+      .flex_none()
+      .px(8)
+      .pb(6)
+      .border_t(1)
+      .border_color(t.border)
+      .child(header(gone))
+      .when(!this.folded.has(gone.id), (el) => el.child(v_flex()
+        .id("ag-exited")
+        .max_h(EXITED_ROWS * 30)
+        .overflow_y_scrollbar()
+        .children(exited.map((e) => this.exitedRow(t, e, now)))));
 
     return v_flex()
       .size_full()
@@ -707,6 +721,7 @@ export default class Agents extends View {
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
       .child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar().mode("always").children(rows))
+      .when(Boolean(footer), (el) => el.child(footer))
       .when(collapsed, (el) =>
         el.child(
           h_flex()
