@@ -1,6 +1,6 @@
 # Herdr Resume
 
-![Herdr Resume: a Resume button in the pane header, next to the folder](preview.png)
+![Herdr Resume: Resume buttons in the pane headers, and quit agents under Exited at the bottom of the Agents panel](preview.png)
 
 A **Resume** button in the pane header of the [Herdr](https://herdr.dev) desktop app. Quit Claude Code or Codex, and one click brings that terminal's last session back.
 
