@@ -13,20 +13,23 @@ const SAFE_FLAGS = new RegExp(`^(?:${FLAG})(?: (?:${FLAG}))*$`);
 // a control character, which could press enter halfway.
 const SAFE_FOLDER = /^\/[^'\u0000-\u001f\u007f]*$/;
 
-const COMMANDS = {
-  claude: (id, flags) => ["claude", flags, "--resume", id].filter(Boolean).join(" "),
-  codex: (id) => `codex resume ${id}`,
+// As separate arguments, for a new terminal (tab.new argv); joined, for a shell.
+const ARGV = {
+  claude: (id, flags) => ["claude", ...flags.split(" ").filter(Boolean), "--resume", id],
+  codex: (id) => ["codex", "resume", id],
 };
 
 // labels: the terminal's labels. fallback: a folder to go to when the labels
 // don't name a usable one, such as where the agent ran when the panel last saw it.
 // The labels end up on a command line, so only an exact match counts.
+// Returns { provider, id, folder, argv, command } or null.
 export function lastSession(labels, fallback = null) {
   const match = /^(claude|codex):([A-Za-z0-9_-]+)$/.exec(labels?.["session.resume"] ?? "");
   if (!match) return null;
   const [, provider, id] = match;
   const flags = labels["session.resume.flags"] ?? "";
-  const resume = COMMANDS[provider](id, SAFE_FLAGS.test(flags) ? flags : "");
+  const argv = ARGV[provider](id, SAFE_FLAGS.test(flags) ? flags : "");
   const folder = [labels["session.resume.cwd"], fallback].find((f) => typeof f === "string" && SAFE_FOLDER.test(f)) ?? null;
-  return { provider, id, folder, command: folder ? `cd '${folder}' && ${resume}` : resume };
+  const resume = argv.join(" ");
+  return { provider, id, folder, argv, command: folder ? `cd '${folder}' && ${resume}` : resume };
 }

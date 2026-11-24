@@ -1,10 +1,11 @@
 // Agents in grouped or priority views; parents take their most urgent sub-agent's place.
 //
 // Herdr Resume: Herdr's own Agents panel (Apache License 2.0), plus an "Exited"
-// group at the bottom. An agent that quits stays there for an hour while its
-// terminal is back at a shell and has a session to go back to (the
-// session.resume labels of hooks/herdr-resume-label). Its Resume button goes
-// back to the session's folder and resumes it in that same terminal.
+// group at the bottom. An agent that quits stays there for an hour with a
+// Resume button, as long as it has a session to go back to (the session.resume
+// labels of hooks/herdr-resume-label). When its terminal is back at a shell,
+// Resume goes back to the session's folder and resumes it there. When its pane
+// was closed, and the terminal with it, Resume opens a new tab in the same space.
 //
 // Use it in a layout in place of Herdr's: { "mod": "agents-resume" }.
 // Props: "keepMinutes", how long a quit agent stays (default 60).
@@ -20,6 +21,10 @@ const keepMs = () => (Number(props()?.keepMinutes) > 0 ? Number(props().keepMinu
 
 // A second click soon after the first would land in the agent as a prompt.
 const CLICK_GUARD_MS = 3000;
+
+// The labels a quit agent needs, kept while it runs: a closed terminal drops out of terminals().
+const KEPT = ["session.resume", "session.resume.flags", "session.resume.cwd", "herdr.space", "where"];
+const keep = (labels) => Object.fromEntries(KEPT.filter((k) => typeof labels?.[k] === "string").map((k) => [k, labels[k]]));
 
 const folderName = (f) => {
   const h = home();
@@ -122,6 +127,7 @@ export default class Agents extends View {
     try { this.exited = JSON.parse(localStorage.getItem("exited") ?? "{}"); } catch { this.exited = {}; }
     if (!this.exited || typeof this.exited !== "object" || Array.isArray(this.exited)) this.exited = {};
     this.sentAt = {};
+    this.checked = new Map();
     cx.timer.every(30000, (cx) => cx.notify());
   }
 
@@ -195,22 +201,83 @@ export default class Agents extends View {
     else localStorage.removeItem("exited");
   }
 
-  // The quit agents to show, newest first: their terminal is still there, back
-  // at a shell, with a session to go back to.
-  exitedRows(terms) {
-    return Object.entries(this.exited)
-      .map(([address, e]) => {
-        const term = terms.get(address);
-        if (term?.state !== "live" || !term.program?.shell) return null;
-        const session = lastSession(term.labels, e.folder);
-        return session && { ...e, address, session };
-      })
-      .filter(Boolean)
-      .sort((x, y) => y.at - x.at);
+  // The quit agents to show, newest first. Back at a shell, the resume goes into
+  // that terminal ("here"). Closed with its pane, it gets a new tab ("tab"); only
+  // on this computer, because a terminal on another machine also goes missing
+  // while that machine is away. A session that runs again anywhere isn't
+  // offered, and one that quit twice shows once, the latest.
+  exitedRows(terms, cx) {
+    const running = new Set();
+    for (const term of terms.values()) {
+      if (term.state !== "live" || !term.program?.agent) continue;
+      const id = lastSession(term.labels)?.id;
+      if (id) running.add(id);
+    }
+    const spaceIds = new Set(spaces().map((sp) => sp.id));
+    const rows = [];
+    for (const [address, e] of Object.entries(this.exited)) {
+      const term = terms.get(address);
+      let row = null;
+      if (term?.state === "live") {
+        // Running something other than a shell: typing would land in it.
+        if (term.program?.shell) row = { mode: "here", session: lastSession(term.labels, e.folder) };
+      } else if (!address.includes("/")) {
+        this.check(address, cx);
+        const space = e.space ?? e.labels?.["herdr.space"];
+        row = { mode: "tab", space: spaceIds.has(space) ? space : null, session: lastSession(e.labels, e.folder) };
+      }
+      if (!row?.session || running.has(row.session.id)) continue;
+      rows.push({ ...e, ...row, address });
+    }
+    const shown = new Set();
+    return rows.sort((x, y) => y.at - x.at).filter((r) => !shown.has(r.session.id) && shown.add(r.session.id));
   }
 
-  // Back to the session's folder, and the session resumed in the same terminal.
+  // A closed terminal stays in the core as finished until someone removes it
+  // (hc rm). Ask every 30 seconds at most: once it's gone there's nothing to
+  // offer. A quit agent stored before the panel kept labels gets them here.
+  check(address, cx) {
+    if (Date.now() - (this.checked.get(address) ?? 0) < 30000) return;
+    this.checked.set(address, Date.now());
+    cx.spawn(async (cx) => {
+      let found = null;
+      try {
+        const result = await hc(["get", address]);
+        if (result.code === 0) found = JSON.parse(result.stdout);
+      } catch {}
+      const e = this.exited[address];
+      if (!e) return;
+      if (!found) delete this.exited[address];
+      else if (!e.labels) e.labels = keep(found.labels);
+      else return;
+      this.saveExited();
+      cx.notify();
+    });
+  }
+
+  // The old tab's name for the new one, unless it was only a number.
+  tabName(e) {
+    const name = e.tab_name ?? /\/ (.+)$/.exec(e.labels?.where ?? "")?.[1];
+    return name && !/^\d+$/.test(name) ? name : null;
+  }
+
+  // Back to the session's folder, and the session resumed: in the same terminal,
+  // or in a new tab when that terminal is gone.
   resume(e, cx) {
+    if (e.mode === "tab") {
+      delete this.exited[e.address];
+      this.saveExited();
+      const name = this.tabName(e);
+      run("tab.new", {
+        ...(e.space ? { space: e.space } : {}),
+        ...(name ? { name } : {}),
+        ...(e.session.folder ? { folder: e.session.folder } : {}),
+        argv: e.session.argv,
+      });
+      this.hovered = null;
+      cx.notify();
+      return;
+    }
     const now = Date.now();
     if (now - (this.sentAt[e.address] ?? 0) < CLICK_GUARD_MS) return;
     this.sentAt[e.address] = now;
@@ -263,7 +330,7 @@ export default class Agents extends View {
       .font_semibold()
       .cursor_pointer()
       .hover((s) => s.bg(t.accent).text_color(t.accent_foreground))
-      .tooltip(e.session.folder ? `Resume in ${folderName(e.session.folder)}` : "Resume")
+      .tooltip(`Resume${e.mode === "tab" ? " in a new tab" : ""}${e.session.folder ? ` in ${folderName(e.session.folder)}` : ""}`)
       .on_click((_e, cx) => {
         cx.stop_propagation();
         this.resume(e, cx);
@@ -284,7 +351,10 @@ export default class Agents extends View {
         else if (this.hovered === key) this.hovered = null;
         cx.notify();
       })
-      .on_click(() => run("pane.focus", { terminal: e.address }))
+      .on_click(() => {
+        if (e.mode === "here") run("pane.focus", { terminal: e.address });
+        else if (e.space) run("space.select", { id: e.space });
+      })
       .when(Boolean(pic), (el) => el.child(pic))
       .child(h_flex().flex_1().min_w(0).gap(5).items_center()
         .child(div().min_w(0).max_w(more ? 120 : 200).truncate().text_color(t.muted).child(name))
@@ -465,8 +535,12 @@ export default class Agents extends View {
     // only the shell's folder, and the program table only the shell's icon.
     for (const a of everyone) {
       const term = terms.get(a.address);
+      const tab = tabs.get(a.tab);
       this.seen.set(a.address, {
+        space: a.space,
         space_name: a.space_name || null,
+        tab_name: tab?.named ? tab.name : null,
+        labels: keep(term?.labels),
         detail: detail.get(a.address) ?? (clean(a.title) || null),
         name: a.program?.name ?? null,
         icon: a.program?.icon ?? null,
@@ -590,7 +664,7 @@ export default class Agents extends View {
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
-    const exited = collapsed ? [] : this.exitedRows(terms);
+    const exited = collapsed ? [] : this.exitedRows(terms, cx);
     const gone = { id: "exited", label: "Exited", status: null, members: exited };
     const rows = collapsed
       ? list.flatMap(withKids)

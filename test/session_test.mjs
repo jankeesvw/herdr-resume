@@ -44,6 +44,13 @@ test("a folder that could break out of the quotes is never used", () => {
   }
 });
 
+test("the arguments for a new terminal keep each flag separate", () => {
+  const labels = { "session.resume": `claude:${id}`, "session.resume.flags": "--dangerously-skip-permissions --permission-mode plan", "session.resume.cwd": "/work" };
+  assert.deepEqual(lastSession(labels).argv, ["claude", "--dangerously-skip-permissions", "--permission-mode", "plan", "--resume", id]);
+  assert.equal(lastSession(labels).folder, "/work");
+  assert.deepEqual(lastSession({ "session.resume": `codex:${id}` }).argv, ["codex", "resume", id]);
+});
+
 test("strange flags are dropped", () => {
   assert.equal(command({ "session.resume": `claude:${id}`, "session.resume.flags": "--permission-mode x;y" }), `claude --resume ${id}`);
 });

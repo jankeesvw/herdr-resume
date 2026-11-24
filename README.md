@@ -9,7 +9,7 @@ A **Resume** button in the pane header of the [Herdr](https://herdr.dev) desktop
 - **Your permissions stay.** A Claude Code session started with `--dangerously-skip-permissions` or `--permission-mode` comes back with the same flag.
 - **Background runs don't count.** `claude -p`, `codex exec` and `codex review` never replace the session you were working in.
 - **Back in the right folder.** Resume goes back to the folder the session ran in first, because Claude only finds a session from there. Wander off with `cd` after quitting and it still works.
-- **Quit agents stay in the Agents panel.** With the optional Agents panel, an agent you quit stays under **Exited** for an hour, with its own Resume button.
+- **Quit agents stay in the Agents panel.** With the optional Agents panel, an agent you quit stays under **Exited** for an hour, with its own Resume button. Closed the pane too? Resume opens a new tab for it.
 
 ## Install
 
@@ -72,7 +72,12 @@ Agents that were already running get the button after their next session start.
 
 ### 3. The Agents panel (optional)
 
-`agents-resume` is Herdr's own Agents panel with an **Exited** group at the bottom. When an agent quits and its terminal is back at a shell, it stays there for an hour, with the time since it quit and a Resume button that goes back to the session's folder and resumes it in the same terminal. Click the row to go to the terminal, hover it for a button that takes it off the list. It's left out when you close the pane, when the terminal runs something other than a shell, and once the agent runs again.
+`agents-resume` is Herdr's own Agents panel with an **Exited** group at the bottom. An agent that quits stays there for an hour, with the time since it quit and a Resume button:
+
+- **Quit, pane still open:** Resume types the resume into that terminal, after a `cd` to the session's folder. Clicking the row goes to the terminal.
+- **Pane closed** (`ctrl-space x`, which ends the terminal too): Resume opens a new tab in the same space, with the old tab's name, and starts the session there in its own folder.
+
+Hover a row for a button that takes it off the list. A row goes away once the session runs again anywhere, when its open terminal runs something other than a shell, and when a closed terminal is removed with `hc rm`. A session that quit twice shows once.
 
 Point the Agents block of your layout at it:
 
@@ -97,7 +102,7 @@ When a session starts, the hook stores it on the terminal with `hc label`: `sess
 
 - Only Claude's permission flags come back. Other flags like `--model` don't, and Codex resumes without its own flags.
 - Sessions labelled before this version have no `session.resume.cwd` yet. The header then resumes where the shell is, until the next session start writes the folder; the Agents panel falls back to the folder it saw the agent run in.
-- Close the pane and the terminal is gone, so there's nothing left to resume in.
+- A closed pane on another machine, such as a workspace VM, isn't offered: its terminal also goes missing while that machine is away, and a resume there could start a session that still runs.
 - `agents-resume` is a copy of Herdr's Agents panel (0.1.18). Changes Herdr makes to its own panel don't come along until the copy is updated.
 - Tested on Linux. On macOS the hook falls back to `ps`, which splits quoted prompts on spaces, so a Codex session started with a prompt whose first word is `exec`, `e` or `review` gets no button.
 
