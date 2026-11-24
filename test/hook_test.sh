@@ -27,6 +27,8 @@ chmod +x "$root/bin/hc"
 id=01a207ef-8107-7271-9be2-69ffbda97af0
 failures=0
 count=0
+# The folder in the payload; check() runs the agent in $root.
+cwd=/work
 
 # check <name> <expected hc arguments, empty for none> <terminal> <session> <agent> [args...]
 check() {
@@ -34,8 +36,8 @@ check() {
   shift 5
   count=$((count + 1))
   rm -f "$root/hc.log"
-  printf '{"session_id":"%s","cwd":"/work","source":"startup"}' "$session" |
-    env HC_TERMINAL_ID="$terminal" PATH="$root/bin:$PATH" "$root/bin/$agent" "$@"
+  printf '{"session_id":"%s","cwd":"%s","source":"startup"}' "$session" "$cwd" |
+    (cd "$root" && env HC_TERMINAL_ID="$terminal" PATH="$root/bin:$PATH" "$root/bin/$agent" "$@")
   got=$(cat "$root/hc.log" 2>/dev/null)
   if [ "$got" != "$want" ]; then
     failures=$((failures + 1))
@@ -43,13 +45,17 @@ check() {
   fi
 }
 
-claude_label="label t5 session.resume=claude:$id session.resume.flags="
-codex_label="label t5 session.resume=codex:$id session.resume.flags="
+# label <provider> [flags]: what the hook should send for the folder /work.
+label() {
+  printf 'label t5 session.resume=%s:%s session.resume.flags=%s session.resume.cwd=/work' "$1" "$id" "${2:-}"
+}
+claude_label=$(label claude)
+codex_label=$(label codex)
 
 check "claude without flags" "$claude_label" t5 "$id" claude
-check "claude keeps skip-permissions" "$claude_label--dangerously-skip-permissions" t5 "$id" claude --model opus --dangerously-skip-permissions
-check "claude keeps permission mode" "$claude_label--permission-mode plan" t5 "$id" claude --permission-mode plan
-check "claude keeps permission mode with =" "$claude_label--permission-mode=plan" t5 "$id" claude --permission-mode=plan
+check "claude keeps skip-permissions" "$(label claude --dangerously-skip-permissions)" t5 "$id" claude --model opus --dangerously-skip-permissions
+check "claude keeps permission mode" "$(label claude '--permission-mode plan')" t5 "$id" claude --permission-mode plan
+check "claude keeps permission mode with =" "$(label claude --permission-mode=plan)" t5 "$id" claude --permission-mode=plan
 check "claude drops a strange mode" "$claude_label" t5 "$id" claude --permission-mode 'x;y'
 check "claude -p is left alone" "" t5 "$id" claude -p summarize
 check "claude --print is left alone" "" t5 "$id" claude --print summarize
@@ -66,6 +72,17 @@ fi
 check "outside Herdr nothing happens" "" "" "$id" claude
 check "a strange terminal is ignored" "" 't5;x' "$id" claude
 check "a strange session id is ignored" "" t5 'x; rm -rf ~' claude
+
+no_folder="label t5 session.resume=claude:$id session.resume.flags= session.resume.cwd="
+cwd="/work/it's"
+check "a folder with a quote is left out" "$no_folder" t5 "$id" claude
+cwd=work
+check "a relative folder is left out" "$no_folder" t5 "$id" claude
+cwd='/work/a\"b'
+check "an escaped folder falls back to where the agent runs" "label t5 session.resume=claude:$id session.resume.flags= session.resume.cwd=$root" t5 "$id" claude
+cwd="/home/me/my project"
+check "a folder with a space is kept" "label t5 session.resume=claude:$id session.resume.flags= session.resume.cwd=/home/me/my project" t5 "$id" claude
+cwd=/work
 
 if [ "$failures" -gt 0 ]; then
   printf '%s of %s failed\n' "$failures" "$count"

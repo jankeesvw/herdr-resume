@@ -3,8 +3,9 @@
 //
 // The SessionStart hook (hooks/herdr-resume-label) stores that session as the
 // terminal label session.resume=<provider>:<session id>, and Claude's permission
-// flags as session.resume.flags. While a shell runs in that terminal, the button
-// right after the folder types the resume command into it.
+// flags as session.resume.flags, and its folder as session.resume.cwd. While a
+// shell runs in that terminal, the button right after the folder types the
+// resume command into it, after a cd to that folder.
 //
 // Put it on the panes of a layout:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "resume" } } } }
@@ -19,34 +20,22 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { hc, home, layout, notify, panes, props, run, terminals, theme } from "herdr";
 import { follow, DELAY } from "./follow.js";
+import { lastSession as sessionOf } from "./session.js";
 
 // One-color glyphs, because an image() can stay blank when the button first appears.
-const PROVIDERS = {
-  claude: {
-    icon: () => svg("mods/resume/claude.svg").size(14).flex_none().text_color("#D97757"),
-    command: (id, flags) => ["claude", flags, "--resume", id].filter(Boolean).join(" "),
-  },
-  codex: {
-    icon: (t) => svg("mods/resume/codex.svg").size(14).flex_none().text_color(t.solid_foreground),
-    command: (id) => `codex resume ${id}`,
-  },
+const ICONS = {
+  claude: () => svg("mods/resume/claude.svg").size(14).flex_none().text_color("#D97757"),
+  codex: (t) => svg("mods/resume/codex.svg").size(14).flex_none().text_color(t.solid_foreground),
 };
 
 // A second click soon after the first would land in the agent as a prompt.
 const CLICK_GUARD_MS = 3000;
 
-// The permission flags Claude started with, the only ones a resume takes over.
-const FLAG = "--dangerously-skip-permissions|--permission-mode[= ][A-Za-z]+";
-const SAFE_FLAGS = new RegExp(`^(?:${FLAG})(?: (?:${FLAG}))*$`);
-
-// The labels end up on a command line, so only an exact match counts.
+// The command goes back to the session's folder first: Claude only finds a
+// session from the folder it ran in.
 function lastSession(address) {
-  const labels = terminals().find((x) => x.address === address)?.labels ?? {};
-  const match = /^(claude|codex):([A-Za-z0-9_-]+)$/.exec(labels["session.resume"] ?? "");
-  if (!match) return null;
-  const provider = PROVIDERS[match[1]];
-  const flags = labels["session.resume.flags"] ?? "";
-  return { icon: provider.icon, command: provider.command(match[2], SAFE_FLAGS.test(flags) ? flags : "") };
+  const session = sessionOf(terminals().find((x) => x.address === address)?.labels);
+  return session && { icon: ICONS[session.provider], command: session.command };
 }
 
 // Match the first visible tab frame, including the active child of a stack.

@@ -4,6 +4,7 @@
 # Stores the session on its Herdr terminal, for the Resume button:
 #   session.resume=<provider>:<session id>
 #   session.resume.flags=<Claude's permission flags>
+#   session.resume.cwd=<the folder the session runs in>
 #
 # Background runs (claude -p, codex exec, codex review) are left alone, so they
 # never replace the session you were working in. When the hook can't tell what
@@ -15,8 +16,19 @@ case $provider in claude | codex) ;; *) exit 0 ;; esac
 terminal=${HC_TERMINAL_ID:-}
 case $terminal in "" | *[!A-Za-z0-9_.-]*) exit 0 ;; esac
 
-session=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]*\)".*/\1/p' | head -n 1)
+payload=$(cat)
+session=$(printf '%s\n' "$payload" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]*\)".*/\1/p' | head -n 1)
 [ -n "$session" ] || exit 0
+
+# The session's folder, where a resume has to start: Claude looks for the
+# session in the folder it runs in. A folder with an escape in its JSON falls
+# back to the hook's own, which the agent starts it in.
+cwd=$(printf '%s\n' "$payload" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p' | head -n 1)
+[ -n "$cwd" ] || cwd=$PWD
+# It goes on a command line in single quotes: absolute, without a quote or a control character.
+case $cwd in /*) ;; *) cwd= ;; esac
+case $cwd in *\'*) cwd= ;; esac
+if printf '%s' "$cwd" | LC_ALL=C grep -q '[[:cntrl:]]'; then cwd=; fi
 
 # Arguments are handled one per line, without globbing.
 set -f
@@ -110,5 +122,5 @@ elif codex_runs_in_background "$@"; then
   exit 0
 fi
 
-hc label "$terminal" "session.resume=$provider:$session" "session.resume.flags=${flags# }" >/dev/null 2>&1
+hc label "$terminal" "session.resume=$provider:$session" "session.resume.flags=${flags# }" "session.resume.cwd=$cwd" >/dev/null 2>&1
 exit 0
